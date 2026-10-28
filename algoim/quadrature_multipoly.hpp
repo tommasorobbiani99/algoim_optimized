@@ -197,6 +197,66 @@ booluarray<N - 1, ALGOIM_M> restrictToFace(const booluarray<N, ALGOIM_M> &a,
   return r;
 }
 
+// Calcolo del determinante e rango stimato usando Eliminazione di Gauss (LU)
+// con partial pivoting. Molto più veloce del QR basato su Givens per matrici
+// dense di piccole/medie dimensioni.
+template <typename T> T det_lu(xarray<T, 2> &A, int &rank, T tol = 10.0) {
+  PROFILE_SCOPE("algoim::det_lu");
+  assert(A.ext(0) == A.ext(1) && A.ext(0) > 0);
+  using std::abs;
+  using std::max;
+
+  T det = 1.0;
+  int n = A.ext(0);
+  T max_diag_u = 0.0;
+
+  for (int i = 0; i < n; ++i) {
+    // 1. Ricerca del pivot massimo nella colonna i
+    int pivot = i;
+    T max_val = abs(A(i, i));
+    for (int j = i + 1; j < n; ++j) {
+      T val = abs(A(j, i));
+      if (val > max_val) {
+        max_val = val;
+        pivot = j;
+      }
+    }
+
+    // 2. Scambio delle righe se necessario
+    if (pivot != i) {
+      for (int k = i; k < n; ++k) {
+        std::swap(A(i, k), A(pivot, k));
+      }
+      det *= -1.0; // Ogni scambio inverte il segno del determinante
+    }
+
+    T diag = A(i, i);
+    det *= diag;
+    max_diag_u = max(max_diag_u, abs(diag));
+
+    // 3. Eliminazione gaussiana
+    if (abs(diag) > 0.0) { // Evitiamo divisioni per zero
+      for (int j = i + 1; j < n; ++j) {
+        T factor = A(j, i) / diag;
+        for (int k = i + 1; k < n; ++k) {
+          A(j, k) -= factor * A(i, k);
+        }
+      }
+    }
+  }
+
+  // 4. Stima del rango basata sulla diagonale di U
+  tol *= max_diag_u * n * std::numeric_limits<T>::epsilon();
+  rank = 0;
+  for (int i = 0; i < n; ++i) {
+    if (abs(A(i, i)) > tol) {
+      ++rank;
+    }
+  }
+
+  return det;
+}
+
 // Compute determinant of the given matrix using QR + Givens rotations + column
 // pivoting, along with approximated rank
 //   in: square matrix A, which will be overwritten
@@ -312,7 +372,7 @@ bool resultant_core(const xarray<real, N> &p, const xarray<real, N> *q, int k,
       bernstein::sylvesterMatrix(pk, P, qk, Q, mat);
 
     int rank;
-    f.l(i) = det_qr(mat, rank);
+    f.l(i) = det_lu(mat, rank);
   }
 
   // Interpolate the resultant on the tensor-product grid
